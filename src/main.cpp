@@ -153,7 +153,7 @@ int main()
     net.initialize();
     net.set_default_data_layer("data_train_layer");
 
-    shared_ptr<Optimizer> optimizer(new SGDOptimizer(0.1, vector<int>{6000, 8000}, 0.0));
+    shared_ptr<Optimizer> optimizer(new AdamOptimizer(0.001, vector<int>{6000, 8000}));
     net.set_optimizer(optimizer);
 
     map<string, vector<float>> acc_map;
@@ -192,7 +192,7 @@ int main()
             net.set_default_data_layer("data_train_layer");
         }
     }
-    write_to_file(acc_map, loss_map, "sgd");
+    write_to_file(acc_map, loss_map, "adam");
 
     return 0;
 }
