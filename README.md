@@ -3,6 +3,8 @@ A Lenet5 C++ implementation without using any deep learning framework
 
 In this repository, I implemented a simple Lenet5 network with C++, without using any deep learning framework. Four optimization algorithms are implemented: SGD, Adam, AdaGrad, RMSProb. The experimental results of the four optimization algorithms are as follows. It can be seen that Adam has achieved the best test accuracy 99.15% (99.05% in Lecun's original paper [Gradient-Based Learning Applied to Document Recognition](http://yann.lecun.com/exdb/publis/pdf/lecun-98.pdf)). This also reflects the superiority of the Adam algorithm, which is less sensitive to the choice of optimizing superparameters.
 
+![accuracy](accuracy.png)
+
 ## Requirements
 - Python3
 - NumPy
