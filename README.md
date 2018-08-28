@@ -18,8 +18,8 @@ As a comparative experiment, I implemented a network with the same configuration
 **Step 1.** 
 Clone this repository with ``git``.
 ```
-$ git clone https://github.com/VectorFist/LeNet5.git
-$ cd LeNet5
+$ git clone https://github.com/VectorFist/MicroNet.git
+$ cd MicroNet
 ```
 
 **Step 2.** 
