@@ -6,7 +6,7 @@ INC=-I./include/
 $(shell mkdir -p objs)
 
 lenet5: $(SOURCES:src/%.cpp=objs/%.o)
-	$(CC) $^ -o $@
+	$(CC) -pthread $^ -o $@
 
 objs/%.o: src/%.cpp
 	$(CC) $(CFLAGS) $(INC) $< -o $@
