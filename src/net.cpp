@@ -78,10 +78,10 @@ void Net::initialize() {
         for (const auto& layer: layer_inner_degree) {
             if (layer.second == 0) {
                 net_sequences_.push_back(layer.first);
-                layer_inner_degree.erase(layer.first);
                 for (const string& point_layer: net_graph_[layer.first]) {
                     layer_inner_degree[point_layer] -= 1;
                 }
+                layer_inner_degree.erase(layer.first);
             }
         }
     }
