@@ -47,7 +47,7 @@ void __forward__(Chunk* input, Chunk* output, Chunk* mask, string pooling, int s
                         hstart = max(hstart, 0);
                         wstart = max(wstart, 0);
                         const int oindex = output->offset(n, c, oh, ow);
-                        output_data[oindex] = numeric_limits<float>::min();
+                        output_data[oindex] = -numeric_limits<float>::min();
                         mask_data[oindex] = -1;
                         for (int ih = hstart; ih < hend; ++ih) {
                             for (int iw = wstart; iw < wend; iw++) {
