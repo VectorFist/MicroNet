@@ -23,6 +23,19 @@ Chunk::Chunk(const vector<int>& shape) {
     diff_ = make_shared<vector<float> >(count());
 }
 
+Chunk::Chunk(const Chunk& chunk) {
+    data_ = make_shared<vector<float> >();
+    diff_ = make_shared<vector<float> >();
+    operator=(chunk);
+}
+
+Chunk& Chunk::operator=(const Chunk& chunk) {
+    reshape(chunk.shape());
+    data_->assign(chunk.const_data(), chunk.const_data() + chunk.count());
+    diff_->assign(chunk.const_diff(), chunk.const_diff() + chunk.count());
+    return *this;
+}
+
 const float* Chunk::const_data() const {
     return data_->data();
 }
@@ -52,7 +65,7 @@ void Chunk::reshape(const vector<int>& shape) {
 }
 
 void Chunk::copy_from(const Chunk& source) {
-    shape_ = source.shape();
+    reshape(source.shape());
     data_->assign(source.const_data(), source.const_data() + source.count());
     diff_->assign(source.const_diff(), source.const_diff() + source.count());
 }
