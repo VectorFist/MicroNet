@@ -5,20 +5,17 @@
  **/
 #include "chunk.h"
 
-Chunk::Chunk() {
-    shape_ = {0, 0, 0, 0};
+Chunk::Chunk(): shape_{0, 0, 0, 0} {
     data_ = make_shared<vector<float> >();
     diff_ = make_shared<vector<float> >();
 }
 
-Chunk::Chunk(const int n, const int c, const int h, const int w) {
-    shape_ = {n, c, h, w};
+Chunk::Chunk(const int n, const int c, const int h, const int w): shape_{n, c, h, w} {
     data_ = make_shared<vector<float> >(count());
     diff_ = make_shared<vector<float> >(count());
 }
 
-Chunk::Chunk(const vector<int>& shape) {
-    shape_ = shape;
+Chunk::Chunk(const vector<int>& shape): shape_(shape) {
     data_ = make_shared<vector<float> >(count());
     diff_ = make_shared<vector<float> >(count());
 }
