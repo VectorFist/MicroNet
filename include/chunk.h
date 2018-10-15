@@ -14,7 +14,7 @@ public:
     Chunk();
     explicit Chunk(const int n, const int c, const int h, const int w);
     explicit Chunk(const vector<int>& shape);
-    explicit Chunk(const Chunk& chunk);
+    Chunk(const Chunk& chunk);
     Chunk& operator=(const Chunk& chunk);
 
     const float* const_data() const;
