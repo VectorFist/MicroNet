@@ -16,12 +16,12 @@ In addition, I also implemented a simple generated adversarial network for gener
 **loss**
 ![loss](figures/loss.png)
 
-## Requirements
-- g++ >= 4.7
-
 
 ## Gans(fake mnist images)
-![fake mnist images](figure/loss.png)
+![fake mnist images](figures/loss.png)
+
+## Requirements
+- g++ >= 4.7
 
 ## Usage
 **Step 1.** 
