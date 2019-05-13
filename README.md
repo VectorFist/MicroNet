@@ -23,6 +23,7 @@ In addition, I also implemented a simple generated adversarial network for gener
 **loss**
 ![train loss](figures/gans_loss.png)
 **fake mnist images**
+
 ![fake mnist images](figures/gans_imgs.png)
 
 ## Requirements
