@@ -19,6 +19,10 @@ In addition, I also implemented a simple generated adversarial network for gener
 ## Requirements
 - g++ >= 4.7
 
+
+## Gans(fake mnist images)
+![fake mnist images](figure/loss.png)
+
 ## Usage
 **Step 1.** 
 Clone this repository with ``git``.
