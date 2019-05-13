@@ -8,6 +8,8 @@ As a comparative experiment, I implemented a network with the same configuration
 
 In addition, I also implemented a simple generated adversarial network for generating mnist data. Experimental result shows, the GansNet is implemented correctly and training is stable.
 
+
+##LeNet5
 **accuracy**
 ![accuracy](figures/accuracy.png)
 **loss**
