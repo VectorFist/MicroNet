@@ -6,24 +6,30 @@
 #include <cmath>
 #include "adagradoptimizer.h"
 
-AdaGradOptimizer::AdaGradOptimizer(float learning_rate, const vector<int>& decay_steps):
-    Optimizer(learning_rate, decay_steps) {
+namespace micronet {
+
+AdaGradOptimizer::AdaGradOptimizer(float learning_rate, vector<float> decay_locs):
+    Optimizer("AdaGrad", decay_locs) {
+    flt_hps_["learning_rate"] = learning_rate;
 }
 
-void AdaGradOptimizer::optimize(shared_ptr<Chunk>& param, const string& param_name, int iter) {
-    int decay_index = find_if(decay_steps_.begin(), decay_steps_.end(),
-                              [&iter](int step) {return step > iter;}) - decay_steps_.begin();
-    float learning_rate = learning_rate_ * pow(0.1, decay_index);
+void AdaGradOptimizer::optimize(const shared_ptr<Chunk>& param, int iter) {
+    float decay_loc = (float)iter / total_iters_;
+    int decay_index = find_if(decay_locs_.begin(), decay_locs_.end(),
+                              [&decay_loc](float loc) {return loc > decay_loc;}) - decay_locs_.begin();
+    float learning_rate = flt_hps_["learning_rate"] * pow(0.1, decay_index);
 
-    if (accumulate_squared_gradient_.find(param_name) == accumulate_squared_gradient_.end()) {
-        accumulate_squared_gradient_[param_name] = Chunk(param->shape());
+    if (accumulate_squared_gradient_.find(param.get()) == accumulate_squared_gradient_.end()) {
+        accumulate_squared_gradient_[param.get()] = Chunk(param->shape());
     }
     const float* diff = param->const_diff();
     float* data = param->data();
-    float* acc_squared_grad = accumulate_squared_gradient_[param_name].data();
+    float* acc_squared_grad = accumulate_squared_gradient_[param.get()].data();
     for (int i = 0; i < param->count(); ++i) {
         acc_squared_grad[i]  += diff[i] * diff[i];
         float update = -(learning_rate / sqrt(acc_squared_grad[i] + 1e-7F)) * diff[i];
         data[i] += update;
     }
 }
+
+} // namespace micronet
