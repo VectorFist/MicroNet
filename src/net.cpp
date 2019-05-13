@@ -3,46 +3,67 @@
  * @auther yefajie
  * @data 2018/6/26
  **/
-#include <sstream>
+
 #include "net.h"
+#include "convolution.h"
+
+namespace micronet {
+
+map<string, vector<Layer*>> layer_space;
+
+void add_layer_prefix(const chunk_ptr& in, const chunk_ptr& out, const string& prefix) {
+    set<layer_ptr, layer_compare> layer_visited;
+    queue<chunk_ptr> chunks;
+    chunks.push(in);
+    while (chunks.front().get() != out.get()) {
+        chunk_ptr chk = chunks.front();
+        chunks.pop();
+        for (const auto& layer: chk->in_layers_) {
+            if (layer_visited.find(layer) == layer_visited.end()) {
+                layer->layer_name_ = prefix + "_" + layer->layer_name_;
+                layer_visited.insert(layer);
+                for (const auto& chunk: layer->chunks_out_) {
+                    chunks.push(chunk);
+                }
+            }
+        }
+    }
+}
+
+void share_parameters(const chunk_ptr& in, const chunk_ptr& out, const string& layer_space_name) {
+    vector<Layer*>& space = layer_space[layer_space_name];
+    int index = 0;
+    set<layer_ptr, layer_compare> layer_visited;
+    queue<chunk_ptr> chunks;
+    chunks.push(in);
+    while (chunks.front().get() != out.get()) {
+        chunk_ptr chk = chunks.front();
+        chunks.pop();
+        for (const auto& layer: chk->in_layers_) {
+            if (layer_visited.find(layer) == layer_visited.end()) {
+                layer_visited.insert(layer);
+                for (const auto& chunk: layer->chunks_out_) {
+                    chunks.push(chunk);
+                }
+
+                if (index == space.size()) {
+                    space.push_back(layer.get());
+                } else {
+                    int num_params = layer->params_.size();
+                    for (int n = 0; n < num_params; ++n) {
+                        if (layer->params_[n]->trainable()) {
+                            layer->params_[n] = space[index]->params_[n];
+                            //cout << layer->params_[n].use_count() << "======================\n";
+                        }
+                    }
+                }
+                index++;
+            }
+        }
+    }
+}
 
 Net::Net(const string& net_name): net_name_(net_name), iter_(0) {
-}
-
-void Net::add_layer(const shared_ptr<Layer>& layer) {
-    if (all_layers_.find(layer->layer_name_) != all_layers_.end()) {
-        cout << "Add layer error: " << layer->layer_name_ << " exists, please rename it!";
-        exit(1);
-    }
-    all_layers_[layer->layer_name_] = layer;
-    for (const string& chunk: layer->in_chunks_) {
-        if (all_chunks_.find(chunk) == all_chunks_.end()) {
-            all_chunks_[chunk] = Chunk();
-        }
-        input_chunks_belongs_[chunk].push_back(layer->layer_name_);
-    }
-    for (const string& chunk: layer->out_chunks_) {
-        if (all_chunks_.find(chunk) == all_chunks_.end()) {
-            all_chunks_[chunk] = Chunk();
-        }
-    }
-}
-
-void Net::set_data_layers(const vector<string>& data_layers) {
-    data_layers_ = data_layers;
-}
-
-void Net::set_default_data_layer(const string& data_layer) {
-    if (!is_initialized_) {
-        cout << "Net initialize error: please initialize net first before set default data layer!";
-        exit(1);
-    }
-    for (const string& layer: data_layers_) {
-        if (find(net_sequences_.begin(), net_sequences_.end(), layer) != net_sequences_.end()) {
-            net_sequences_.erase(find(net_sequences_.begin(), net_sequences_.end(), layer));
-        }
-    }
-    net_sequences_.insert(net_sequences_.begin(), data_layer);
 }
 
 void Net::set_optimizer(const shared_ptr<Optimizer>& optimizer) {
@@ -50,94 +71,134 @@ void Net::set_optimizer(const shared_ptr<Optimizer>& optimizer) {
 }
 
 void Net::initialize() {
-    for (const auto& layer: all_layers_) {
-        const vector<string>& out_chunks = layer.second->out_chunks_;
-        const string& layer_name = layer.first;
-        for (const string& chunk: out_chunks) {
-            if (input_chunks_belongs_.find(chunk) == input_chunks_belongs_.end()) {
-                continue;
-            }
-            const vector<string>& belongs = input_chunks_belongs_[chunk];
-            for (const string& belong: belongs) {
-                net_graph_[layer_name].push_back(belong);
+    queue<chunk_ptr> chunks;
+    for (const auto& chunk: inputs_) {
+        chunks.push(chunk);
+    }
+    while (!chunks.empty()) {
+        chunk_ptr c = chunks.front();
+        chunks.pop();
+        cout << c->in_layers_.size() << endl;
+        for (const auto& layer: c->in_layers_) {
+            if (all_layers_.find(layer) == all_layers_.end()) {
+                all_layers_.insert(layer);
+                cout << layer->layer_name_ << ":" << layer->chunks_out_.size() <<endl;
+                for (const auto& chunk: layer->chunks_out_) {
+                    chunks.push(chunk);
+                }
             }
         }
     }
 
-    map<string, int> layer_inner_degree;
-    for (const auto& edge: net_graph_) {
-        layer_inner_degree[edge.first] = 0;
+    for (const auto& layer: all_layers_) {
+        for (const auto& chunk: layer->chunks_out_) {
+            if (chunk->in_layers_.empty()) {
+                continue;
+            }
+            for (const auto& belong: chunk->in_layers_) {
+                net_graph_[layer].push_back(belong);
+            }
+        }
     }
+
+    layer_ptr guard_layer(nullptr);
+    for (const auto& in_chunk: inputs_) {
+        for (const auto& layer: in_chunk->in_layers_) {
+            net_graph_[guard_layer].push_back(layer);
+        }
+    }
+
+    for (const auto& from: net_graph_) {
+        if (from.first.get() == nullptr) {
+            cout << "guard: ";
+        } else {
+            cout << from.first->layer_name_ << ": ";
+        }
+        for (const auto& to: from.second) {
+            cout << to->layer_name_ << ", ";
+        }
+        cout << endl;
+    }
+
+    map<layer_ptr, int, layer_compare> layer_inner_degree;
     for (const auto& edge: net_graph_) {
-        for (const string& out_node: edge.second) {
+        for (const auto& out_node: edge.second) {
             layer_inner_degree[out_node] += 1;
         }
     }
+    layer_inner_degree[guard_layer] = 0;
+    for (const auto& layer: layer_inner_degree) {
+        if (layer.first.get() == nullptr) {
+            cout << "guard: " << layer.second << endl;
+        } else {
+            cout << layer.first->layer_name_ << ": " << layer.second << endl;
+        }
+    }
 
-    while(net_sequences_.size() != all_layers_.size()) {
+    while(net_sequences_.size() != all_layers_.size() + 1) {
+        int size_flag = layer_inner_degree.size();
         for (const auto& layer: layer_inner_degree) {
             if (layer.second == 0) {
                 net_sequences_.push_back(layer.first);
-                for (const string& point_layer: net_graph_[layer.first]) {
+                for (const auto& point_layer: net_graph_[layer.first]) {
                     layer_inner_degree[point_layer] -= 1;
                 }
                 layer_inner_degree.erase(layer.first);
             }
         }
+        if (layer_inner_degree.size() == size_flag) {
+            cout << "the graph built must be undirected..." << endl;
+            exit(1);
+        }
     }
+    net_sequences_.erase(net_sequences_.begin());
 
-    cout << "Initialize net ..." << endl;
-    for (const string& layer: net_sequences_) {
-        cout << layer << " --> ";
-        for (const string& point_layer: net_graph_[layer]) {
-            cout << point_layer << ", ";
+    for (const auto& layer: net_sequences_) {
+        cout << layer->layer_name_ << " --> ";
+        for (const auto& point_layer: net_graph_[layer]) {
+            cout << point_layer->layer_name_ << ", ";
         }
         cout << endl;
     }
+
+    net_initialized_ = true;
     cout << "Initialize net done !" << endl << endl;
-    is_initialized_ = true;
 }
 
-void Net::forward() {
-    if (!is_initialized_) {
-        cout << "Net initialize error: please initialize net first before net forward!";
-        exit(1);
-    }
+void Net::save_model(const string& save_path) {
+    Timer timer;
 
-    for (auto layer = net_sequences_.begin(); layer != net_sequences_.end(); ++layer) {
-        vector<Chunk*> input, output;
-        for (const string& chunk: all_layers_[*layer]->in_chunks_) {
-            input.push_back(&all_chunks_[chunk]);
-        }
-        for (const string& chunk: all_layers_[*layer]->out_chunks_) {
-            output.push_back(&all_chunks_[chunk]);
-        }
-        all_layers_[*layer]->forward(input, output);
-    }
+    json j_net;
+    to_json(j_net, this);
+    std::ofstream ofs(save_path);
+    ofs << j_net << endl;
+
+    cout << "save model use time: " << timer.elapsed() << " s" << endl;
 }
 
+void Net::load_model(const string& save_path) {
+    Timer timer;
 
-void Net::backward() {
-    for (auto layer = net_sequences_.rbegin(); layer != net_sequences_.rend(); ++layer) {
-        vector<Chunk*> input, output;
-        for (const string& chunk: all_layers_[*layer]->in_chunks_) {
-            input.push_back(&all_chunks_[chunk]);
-        }
-        for (const string& chunk: all_layers_[*layer]->out_chunks_) {
-            output.push_back(&all_chunks_[chunk]);
-        }
-        all_layers_[*layer]->backward(input, output);
-    }
+    json j_net;
+    std::ifstream ifs(save_path);
+    ifs >> j_net;
+    from_json(j_net, this);
+
+    net_initialized_ = true;
+    cout << "load model use time: " << timer.elapsed() << " s" << endl;
 }
 
-void Net::update() {
-    iter_++;
-    for (const string& layer: net_sequences_) {
-        vector<shared_ptr<Chunk>>& params = all_layers_[layer]->params_;
-        for (unsigned i = 0; i < params.size(); ++i) {
-            stringstream param_name;
-            param_name << layer << "_" << i;
-            optimizer_->optimize(params[i], param_name.str(), iter_);
+void Net::print_net() {
+    for (const auto& layer: net_sequences_) {
+        cout << layer->layer_type_ << ": " << setw(20) << layer->layer_name_ << endl;
+        cout << layer->chunks_in_.size() << " " << layer->chunks_out_.size() << endl;
+        for (const auto& chunk: layer->chunks_in_) {
+            cout << chunk->str_shape() << endl;
+        }
+        for (const auto& chunk: layer->chunks_out_) {
+            cout << chunk->str_shape() << endl;
         }
     }
 }
+
+} // namespace micronet

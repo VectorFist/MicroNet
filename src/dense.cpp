@@ -7,127 +7,112 @@
 #include <chrono>
 #include <iostream>
 #include <thread>
+#include <string.h>
+
 #include "dense.h"
+#include "util.h"
+#include "math_func.h"
 
-Dense::Dense(int in_dim, int out_dim, const string& layer_name, float mean, float stddev, float bias_value) {
-    params_.push_back(make_shared<Chunk>(in_dim, out_dim, 1, 1));
-    params_.push_back(make_shared<Chunk>(1, out_dim, 1, 1));
-    initialize(mean, stddev, bias_value);
-    layer_name_ = layer_name;
-    cout << "Initialize dense layer: " << layer_name_ << " done..." << endl;
+namespace micronet {
+
+Dense::Dense(int out_dim, float mean, float stddev, float bias_value, const string& layer_name):
+    Layer(layer_name, "Dense") {
+    int_hps_["out_dim"] = out_dim;
+    flt_hps_["init_mean"] = mean;
+    flt_hps_["init_stddev"] = stddev;
+    flt_hps_["init_bias_value"] = bias_value;
+    cout << "Initialize dense layer: " << layer_name << " done..." << endl;
 }
 
-void Dense::set_chunks(const vector<string>& in_chunks, const vector<string>& out_chunks) {
-    in_chunks_ = in_chunks;
-    out_chunks_ = out_chunks;
+chunk_ptr Dense::operator()(const chunk_ptr& in_chunk) {
+    chunks_in_ = {in_chunk};
+    chunk_ptr out_chunk = make_shared<Chunk>(shape_inference());
+    chunks_out_ = {out_chunk};
+
+    int in_dim = in_chunk->count() / in_chunk->num();
+    params_.push_back(make_shared<Chunk>(in_dim, int_hps_["out_dim"], 1, 1));
+    params_.push_back(make_shared<Chunk>(1, int_hps_["out_dim"], 1, 1));
+    initialize();
+
+    layer_ptr layer = make_shared<Dense>(*this);
+    in_chunk->in_layers_.push_back(layer);
+    out_chunk->out_layer_ = layer;
+
+    return out_chunk;
 }
 
-void __forward__(Chunk* input, Chunk* output, shared_ptr<Chunk>* weights, shared_ptr<Chunk>* bias,
-                 int start_n, int end_n, int out_dim, int in_dim) {
-    const float* input_data = input->const_data();
-    const float* weights_data = (*weights)->const_data();
-    const float* bias_data = (*bias)->const_data();
-    float* output_data = output->data();
-
-    for (int n = start_n; n < end_n; ++n) {
-        for (int od = 0; od < out_dim; ++od) {
-            const int oindex = output->offset(n, od, 0, 0);
-            const int bindex = (*bias)->offset(0, od, 0, 0);
-            output_data[oindex] = 0;
-            for (int id = 0; id < in_dim; ++id) {
-                const int iindex = n * in_dim + id;
-                const int windex = (*weights)->offset(id, od, 0, 0);
-                output_data[oindex] += input_data[iindex] * weights_data[windex];
-            }
-            output_data[oindex] += bias_data[bindex];
-        }
-    }
-}
-
-void Dense::forward(const vector<Chunk*>& input, const vector<Chunk*>& output) {
-    int num = input[0]->num();
-    int input_channels = input[0]->channels();
-    int input_h = input[0]->height();
-    int input_w = input[0]->width();
+void Dense::forward(bool is_train) {
+    Timer timer;
+    int num = chunks_in_[0]->num();
+    int input_channels = chunks_in_[0]->channels();
+    int input_h = chunks_in_[0]->height();
+    int input_w = chunks_in_[0]->width();
     int in_dim = input_channels * input_h * input_w;
-    int out_dim = params_[0]->channels();
-    output[0]->reshape(num, out_dim, 1, 1);
+    int out_dim = int_hps_["out_dim"];
+    chunks_out_[0]->reshape(num, out_dim, 1, 1);
+    all_one_tmp_.reshape(num, 1, 1, 1);
+    all_one_tmp_.fill_value(1.0, 1.0);
 
-    if (params_[0]->num() != in_dim) {
-        cout << "Dense Error: weight num must match input dim(" << params_[0]->num() << "!=" << in_dim << ")";
-        exit(1);
-    }
-    if (num < 4) {
-        __forward__(input[0], output[0], &params_[0], &params_[1],
-                    0, num, out_dim, in_dim);
-    } else {
-        vector<thread> threads;
-        int block = int(ceil(num / 4.0));
-        for (int i = 0; i < 4; ++i) {
-            threads.push_back(thread(__forward__, input[0], output[0], &params_[0], &params_[1], i*block, min(num, (i+1)*block),
-                                     out_dim, in_dim));
-        }
-        for (int i = 0; i < 4; ++i) {
-            threads[i].join();
-        }
-    }
+    const float* input_data = chunks_in_[0]->const_data();
+    const float* weight_data = params_[0]->const_data();
+    const float* bias_data = params_[1]->const_data();
+    const float* all_one_data = all_one_tmp_.const_data();
+    float* output_data = chunks_out_[0]->data();
+    gemm(0, 0, num, out_dim, in_dim, 1, input_data, in_dim, weight_data, out_dim, 0, output_data, out_dim);
+    gemm(0, 0, num, out_dim, 1, 1, all_one_data, 1, bias_data, out_dim, 1, output_data, out_dim);
+    /*for (int n = 0; n < num; ++n) {
+        add(out_dim, output_data, 1, bias_data, 1, output_data);
+        output_data += out_dim;
+    }*/
+    //cout << "dense forward time:" << timer.elapsed()*1000 << endl;
+    //exit(0);
+    gradient_reset();
+    //cout << "dense forward" << endl;
 }
 
-void Dense::backward(const vector<Chunk*>& input, const vector<Chunk*>& output) {
-    int num = input[0]->num();
-    int input_channels = input[0]->channels();
-    int input_h = input[0]->height();
-    int input_w = input[0]->width();
+void Dense::backward() {
+    Timer timer;
+    int num = chunks_in_[0]->num();
+    int input_channels = chunks_in_[0]->channels();
+    int input_h = chunks_in_[0]->height();
+    int input_w = chunks_in_[0]->width();
     int in_dim = input_channels * input_h * input_w;
-    int out_dim = params_[0]->channels();
+    int out_dim = int_hps_["out_dim"];
 
-    const float* input_data = input[0]->const_data();
-    const float* weights_data = params_[0]->const_data();
-    const float* output_diff = output[0]->const_diff();
-    float* input_diff = input[0]->diff();
     float* weights_diff = params_[0]->diff();
     float* bias_diff = params_[1]->diff();
-    for (int i = 0; i < input[0]->count(); ++i) {
-        input_diff[i] = float(0);
-    }
-    for (int i = 0; i < params_[0]->count(); ++i) {
-        weights_diff[i] = float(0);
-    }
-    for (int i = 0; i < params_[1]->count(); ++i) {
-        bias_diff[i] = float(0);
-    }
 
-    for (int n = 0; n < num; ++n) {
-        for (int od = 0; od < out_dim; ++od) {
-            const int oindex = output[0]->offset(n, od, 0, 0);
-            const int bindex = params_[1]->offset(0, od, 0, 0);
-            for (int id = 0; id <in_dim; ++id) {
-                const int iindex = n * in_dim + id;
-                const int windex = params_[0]->offset(id, od, 0, 0);
-                input_diff[iindex] += output_diff[oindex] * weights_data[windex];
-                weights_diff[windex] += output_diff[oindex] * input_data[iindex];
-            }
-            bias_diff[bindex] += output_diff[oindex];
-        }
-    }
+    const float* input_data = chunks_in_[0]->const_data();
+    const float* weights_data = params_[0]->const_data();
+    const float* output_diff = chunks_out_[0]->const_diff();
+    const float* all_one_data = all_one_tmp_.const_data();
+    float* input_diff = chunks_in_[0]->diff();
+    gemm(0, 1, num, in_dim, out_dim, 1, output_diff, out_dim, weights_data, out_dim, 1, input_diff, in_dim);
+    gemm(1, 0, in_dim, out_dim, num, 1, input_data, in_dim, output_diff, out_dim, 1, weights_diff, out_dim);
+    gemm(1, 0, 1, out_dim, num, 1, all_one_data, 1, output_diff, out_dim, 1, bias_diff, out_dim);
+    //cout << bias_diff[1] << endl;
+    //exit(0);
+    /*for (int n = 0; n < num; ++n) {
+        add(out_dim, bias_diff, 1, output_diff, 1, bias_diff);
+        output_diff += out_dim;
+    }*/
+    //cout << "dense back time:" << timer.elapsed()*1000 << endl;
+    //exit(0);
 }
 
-void Dense::initialize(float mean, float stddev, float bias_value) {
-    unsigned seed = std::chrono::system_clock::now().time_since_epoch().count();
-    std::default_random_engine generator(seed);
-    std::normal_distribution<float> distribution(mean, stddev);
+void Dense::initialize() {
     float* weights_data = params_[0]->data();
     float* bias_data = params_[1]->data();
-    for (int i = 0; i < params_[0]->count(); ++i) {
-        float rnd = distribution(generator);
-        int trial = 0;
-        while ((rnd < (mean - 2 * stddev) || rnd > (mean + 2 * stddev)) && trial < 5) {
-            rnd = distribution(generator);
-            trial++;
-        }
-        weights_data[i] = rnd;
-    }
-    for (int i = 0; i < params_[1]->count(); ++i) {
-        bias_data[i] = bias_value;
-    }
+
+    normal_random_init(params_[0]->count(), weights_data, flt_hps_["init_mean"], flt_hps_["init_stddev"]);
+    constant_init(params_[1]->count(), bias_data, flt_hps_["init_bias_value"]);
 }
+
+vector<int> Dense::shape_inference() {
+    int num = chunks_in_[0]->num();
+    int out_dim = int_hps_["out_dim"];
+
+    return {num, out_dim, 1, 1};
+}
+
+} // namespace micronet

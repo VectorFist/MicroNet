@@ -7,36 +7,77 @@
 #include <cmath>
 #include <iostream>
 #include <thread>
+#include <omp.h>
 #include "pooling.h"
+#include "util.h"
 
-Pooling::Pooling(int kernel_h, int kernel_w, int pad_h, int pad_w, int stride_h,
-                 int stride_w, const string& layer_name, const string& pooling) {
-    kernel_h_ = kernel_h;
-    kernel_w_ = kernel_w;
-    pad_h_ = pad_h;
-    pad_w_ = pad_w;
-    stride_h_ = stride_h;
-    stride_w_ = stride_w;
-    pooling_ = pooling;
-    layer_name_ = layer_name;
-    cout << "Initialize pooling layer: " << layer_name_ << " done..." << endl;
+namespace micronet {
+
+Pooling::Pooling(int kernel_h, int kernel_w, int stride_h, int stride_w, const string& padding,
+                 const string& pooling, const string& layer_name):
+                 Layer(layer_name, "Pooling"), mask_(new Chunk()) {
+    if (padding != "same" && padding != "valid") {
+        cout << "Padding must be same or valid !" << endl;
+        exit(1);
+    }
+    if (pooling != "max" && pooling != "avg" && pooling != "random") {
+        cout << "pooling must be max, avg or random !" << endl;
+        exit(1);
+    }
+    str_hps_["padding"] = padding;
+    int_hps_["kernel_h"] = kernel_h;
+    int_hps_["kernel_w"] = kernel_w;
+    int_hps_["stride_h"] = stride_h;
+    int_hps_["stride_w"] = stride_w;
+    str_hps_["pooling"] = pooling;
+    cout << "Initialize pooling layer: " << layer_name << " done..." << endl;
 }
 
-void Pooling::set_chunks(const vector<string>& in_chunks, const vector<string>& out_chunks) {
-    in_chunks_ = in_chunks;
-    out_chunks_ = out_chunks;
+chunk_ptr Pooling::operator()(chunk_ptr& in_chunk) {
+    chunks_in_ = {in_chunk};
+    pad_inference();
+    chunk_ptr out_chunk = make_shared<Chunk>(shape_inference());
+    chunks_out_ = {out_chunk};
+
+    layer_ptr layer = make_shared<Pooling>(*this);
+    in_chunk->in_layers_.push_back(layer);
+    out_chunk->out_layer_ = layer;
+
+    return out_chunk;
 }
 
-void __forward__(Chunk* input, Chunk* output, Chunk* mask, string pooling, int start_n, int end_n,
-                 int channels, int output_h, int output_w,
-                 int input_h, int input_w, int kernel_h, int kernel_w, int pad_h, int pad_w,
-                 int stride_h, int stride_w) {
-    const float* input_data = input->const_data();
-    float* output_data = output->data();
+void Pooling::forward(bool is_train) {
+    Timer timer;
+    int kernel_h = int_hps_["kernel_h"];
+    int kernel_w = int_hps_["kernel_w"];
+    int pad_h = int_hps_["pad_h"];
+    int pad_w = int_hps_["pad_w"];
+    int stride_h = int_hps_["stride_h"];
+    int stride_w = int_hps_["stride_w"];
+    string pooling = str_hps_["pooling"];
+
+    chunk_ptr in_chunk = chunks_in_[0];
+    chunk_ptr out_chunk = chunks_out_[0];
+
+    vector<int> out_shape = shape_inference();
+    int input_h = in_chunk->height();
+    int input_w = in_chunk->width();
+    int output_h = out_shape[2];
+    int output_w = out_shape[3];
+    int num = in_chunk->num();
+    int channels = in_chunk->channels();
+    out_chunk->reshape(out_shape);
+    if (pooling == "max" || pooling == "random") {
+        mask_->reshape(out_shape);
+    }
+
+    const float* input_data = in_chunk->const_data();
+    float* output_data = out_chunk->data();
 
     if (pooling == "max") {
-        float* mask_data = mask->data();
-        for (int n = start_n; n < end_n; ++n) {
+        float* mask_data = mask_->data();
+        #pragma omp parallel for
+        for (int n = 0; n < num; ++n) {
             for (int c = 0; c < channels; ++c) {
                 for (int oh = 0; oh < output_h; ++oh) {
                     for (int ow = 0; ow <output_w; ++ow) {
@@ -46,12 +87,12 @@ void __forward__(Chunk* input, Chunk* output, Chunk* mask, string pooling, int s
                         int wend = min(wstart + kernel_w, input_w);
                         hstart = max(hstart, 0);
                         wstart = max(wstart, 0);
-                        const int oindex = output->offset(n, c, oh, ow);
-                        output_data[oindex] = -numeric_limits<float>::min();
+                        const int oindex = out_chunk->offset(n, c, oh, ow);
+                        output_data[oindex] = -numeric_limits<float>::max();
                         mask_data[oindex] = -1;
                         for (int ih = hstart; ih < hend; ++ih) {
                             for (int iw = wstart; iw < wend; iw++) {
-                                const int iindex = input->offset(n, c, ih, iw);
+                                const int iindex = in_chunk->offset(n, c, ih, iw);
                                 if (input_data[iindex] > output_data[oindex]) {
                                     output_data[oindex] = input_data[iindex];
                                     mask_data[oindex] = iindex;
@@ -63,7 +104,8 @@ void __forward__(Chunk* input, Chunk* output, Chunk* mask, string pooling, int s
             }
         }
     } else if (pooling == "avg") {
-        for (int n = start_n; n < end_n; ++n) {
+        #pragma omp parallel for
+        for (int n = 0; n < num; ++n) {
             for (int c = 0; c < channels; ++c) {
                 for (int oh = 0; oh < output_h; ++oh) {
                     for (int ow = 0; ow <output_w; ++ow) {
@@ -74,11 +116,11 @@ void __forward__(Chunk* input, Chunk* output, Chunk* mask, string pooling, int s
                         hstart = max(hstart, 0);
                         wstart = max(wstart, 0);
                         const int pooling_size = (hend - hstart) * (wend - wstart);
-                        const int oindex = output->offset(n, c, oh, ow);
+                        const int oindex = out_chunk->offset(n, c, oh, ow);
                         output_data[oindex] = 0;
                         for (int ih = hstart; ih < hend; ++ih) {
                             for (int iw = wstart; iw < wend; iw++) {
-                                const int iindex = input->offset(n, c, ih, iw);
+                                const int iindex = in_chunk->offset(n, c, ih, iw);
                                 output_data[oindex] += input_data[iindex];
                             }
                         }
@@ -87,84 +129,105 @@ void __forward__(Chunk* input, Chunk* output, Chunk* mask, string pooling, int s
                 }
             }
         }
-    }
-}
-
-void Pooling::forward(const vector<Chunk*>& input, const vector<Chunk*>& output) {
-    int input_h = input[0]->height();
-    int input_w = input[0]->width();
-    int output_h = static_cast<int>(ceil(static_cast<float>(input_h + 2 * pad_h_ - kernel_h_) / stride_h_)) + 1;
-    int output_w = static_cast<int>(ceil(static_cast<float>(input_w + 2 * pad_w_ - kernel_w_) / stride_w_)) + 1;
-    int num = input[0]->num();
-    int channels = input[0]->channels();
-    output[0]->reshape(num, channels, output_h, output_w);
-    if (pooling_ == "max") {
-        mask_.reshape(num, channels, output_h, output_w);
-    }
-
-    if (num < 4) {
-        __forward__(input[0], output[0], &mask_, pooling_, 0, num,
-                    channels, output_h, output_w,
-                    input_h, input_w, kernel_h_, kernel_w_, pad_h_, pad_w_,
-                    stride_h_, stride_w_);
-    } else {
-        vector<thread> threads;
-        int block = int(ceil(num / 4.0));
-        for (int i = 0; i < 4; ++i) {
-            threads.push_back(thread(__forward__, input[0], output[0], &mask_, pooling_, i*block, min(num, (i+1)*block),
-                                     channels, output_h, output_w,
-                                     input_h, input_w, kernel_h_, kernel_w_, pad_h_, pad_w_,
-                                     stride_h_, stride_w_));
-        }
-        for (int i = 0; i < 4; ++i) {
-            threads[i].join();
-        }
-    }
-}
-
-void Pooling::backward(const vector<Chunk*>& input, const vector<Chunk*>& output) {
-    int input_h = input[0]->height();
-    int input_w = input[0]->width();
-    int output_h = static_cast<int>(ceil(static_cast<float>(input_h + 2 * pad_h_ - kernel_h_) / stride_h_)) + 1;
-    int output_w = static_cast<int>(ceil(static_cast<float>(input_w + 2 * pad_w_ - kernel_w_) / stride_w_)) + 1;
-    int num = input[0]->num();
-    int channels = input[0]->channels();
-
-    const float* output_diff = output[0]->const_diff();
-    float* input_diff = input[0]->diff();
-    for (int i = 0; i < input[0]->count(); ++i) {
-        input_diff[i] = 0;
-    }
-
-    if (pooling_ == "max") {
-        const float* mask_data = mask_.const_data();
+    } else if (pooling == "random") {
+        UniformGenerator generator(0.0f, 1.0f);
+        float* mask_data = mask_->data();
+        #pragma omp parallel for
         for (int n = 0; n < num; ++n) {
             for (int c = 0; c < channels; ++c) {
                 for (int oh = 0; oh < output_h; ++oh) {
                     for (int ow = 0; ow <output_w; ++ow) {
-                        const int oindex = output[0]->offset(n, c, oh, ow);
+                        int hstart = oh * stride_h - pad_h;
+                        int wstart = ow * stride_w - pad_w;
+                        int hend = min(hstart + kernel_h, input_h);
+                        int wend = min(wstart + kernel_w, input_w);
+                        hstart = max(hstart, 0);
+                        wstart = max(wstart, 0);
+                        const int oindex = out_chunk->offset(n, c, oh, ow);
+                        const int pooling_size = (hend - hstart) * (wend - wstart);
+
+                        if (is_train) {
+                            const int rand_tmp = static_cast<int>(pooling_size*generator());
+                            const int ih = hstart + rand_tmp / (wend - wstart);
+                            const int iw = wstart + rand_tmp % (wend - wstart);
+                            const int iindex = in_chunk->offset(n, c, ih, iw);
+                            output_data[oindex] = input_data[iindex];
+                            mask_data[oindex] = iindex;
+                        } else {
+                            output_data[oindex] = 0;
+                            for (int ih = hstart; ih < hend; ++ih) {
+                                for (int iw = wstart; iw < wend; iw++) {
+                                    const int iindex = in_chunk->offset(n, c, ih, iw);
+                                    output_data[oindex] += input_data[iindex];
+                                }
+                            }
+                            output_data[oindex] /= max(1, pooling_size);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    //cout << "pooling forward time:" << timer.elapsed()*1000 << endl;
+    //exit(0);
+    gradient_reset();
+    //cout << "pooling forward" << endl;
+}
+
+void Pooling::backward() {
+    Timer timer;
+    int kernel_h = int_hps_["kernel_h"];
+    int kernel_w = int_hps_["kernel_w"];
+    int pad_h = int_hps_["pad_h"];
+    int pad_w = int_hps_["pad_w"];
+    int stride_h = int_hps_["stride_h"];
+    int stride_w = int_hps_["stride_w"];
+    string pooling = str_hps_["pooling"];
+
+    chunk_ptr in_chunk = chunks_in_[0];
+    chunk_ptr out_chunk = chunks_out_[0];
+
+    vector<int> out_shape = shape_inference();
+    int input_h = in_chunk->height();
+    int input_w = in_chunk->width();
+    int output_h = out_shape[2];
+    int output_w = out_shape[3];
+    int num = in_chunk->num();
+    int channels = in_chunk->channels();
+
+    const float* output_diff = out_chunk->const_diff();
+    float* input_diff = in_chunk->diff();
+    if (pooling == "max" || pooling == "random") {
+        const float* mask_data = mask_->const_data();
+        #pragma omp parallel for
+        for (int n = 0; n < num; ++n) {
+            for (int c = 0; c < channels; ++c) {
+                for (int oh = 0; oh < output_h; ++oh) {
+                    for (int ow = 0; ow <output_w; ++ow) {
+                        const int oindex = out_chunk->offset(n, c, oh, ow);
                         const int iindex = static_cast<int>(mask_data[oindex]);
                         input_diff[iindex] += output_diff[oindex];
                     }
                 }
             }
         }
-    } else if (pooling_ == "avg") {
+    } else if (pooling == "avg") {
+        #pragma omp parallel for
         for (int n = 0; n < num; ++n) {
             for (int c = 0; c < channels; ++c) {
                 for (int oh = 0; oh < output_h; ++oh) {
                     for (int ow = 0; ow <output_w; ++ow) {
-                        int hstart = oh * stride_h_ - pad_h_;
-                        int wstart = ow * stride_w_ - pad_w_;
-                        int hend = min(hstart + kernel_h_, input_h);
-                        int wend = min(wstart + kernel_w_, input_w);
+                        int hstart = oh * stride_h - pad_h;
+                        int wstart = ow * stride_w - pad_w;
+                        int hend = min(hstart + kernel_h, input_h);
+                        int wend = min(wstart + kernel_w, input_w);
                         hstart = max(hstart, 0);
                         wstart = max(wstart, 0);
                         const int pooling_size = (hend - hstart) * (wend - wstart);
-                        const int oindex = output[0]->offset(n, c, oh, ow);
+                        const int oindex = out_chunk->offset(n, c, oh, ow);
                         for (int ih = hstart; ih < hend; ++ih) {
                             for (int iw = wstart; iw < wend; iw++) {
-                                const int iindex = input[0]->offset(n, c, ih, iw);
+                                const int iindex = in_chunk->offset(n, c, ih, iw);
                                 input_diff[iindex] += output_diff[oindex] / pooling_size;
                             }
                         }
@@ -173,4 +236,45 @@ void Pooling::backward(const vector<Chunk*>& input, const vector<Chunk*>& output
             }
         }
     }
+    //cout << "pooling back time:" << timer.elapsed()*1000 << endl;
+    //exit(0);
 }
+
+void Pooling::pad_inference() {
+    if (str_hps_["padding"] == "valid") {
+        int_hps_["pad_h"] = 0;
+        int_hps_["pad_w"] = 0;
+    } else if (str_hps_["padding"] == "same") {
+        int kernel_h = int_hps_["kernel_h"];
+        int kernel_w = int_hps_["kernel_w"];
+        int stride_h = int_hps_["stride_h"];
+        int stride_w = int_hps_["stride_w"];
+
+        int input_h = chunks_in_[0]->height();
+        int input_w = chunks_in_[0]->width();
+        int output_h = std::ceil(float(input_h) / stride_h);
+        int output_w = std::ceil(float(input_w) / stride_w);
+        int_hps_["pad_h"] = (output_h * stride_h + kernel_h - input_h) / 2;
+        int_hps_["pad_w"] = (output_w * stride_w + kernel_w - input_w) / 2;
+    }
+}
+
+vector<int> Pooling::shape_inference() {
+    int kernel_h = int_hps_["kernel_h"];
+    int kernel_w = int_hps_["kernel_w"];
+    int pad_h = int_hps_["pad_h"];
+    int pad_w = int_hps_["pad_w"];
+    int stride_h = int_hps_["stride_h"];
+    int stride_w = int_hps_["stride_w"];
+
+    int input_h = chunks_in_[0]->height();
+    int input_w = chunks_in_[0]->width();
+    int output_h = (input_h + 2*pad_h - kernel_h) / stride_h + 1;
+    int output_w = (input_w + 2*pad_w - kernel_w) / stride_w + 1;
+    int num = chunks_in_[0]->num();
+    int output_channels = chunks_in_[0]->channels();
+
+    return {num, output_channels, output_h, output_w};
+}
+
+} // namespace micronet

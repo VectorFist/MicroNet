@@ -3,32 +3,21 @@
  * @auther yefajie
  * @data 2018/6/23
  **/
+#include <omp.h>
 #include "relu.h"
 
-ReLU::ReLU(const string& layer_name) {
-    layer_name_ = layer_name;
+namespace micronet {
+
+ReLU::ReLU(const string& layer_name): Layer(layer_name, "ReLU") {
     cout << "Initialize relu layer: " << layer_name_ << " done..." << endl;
 }
 
-void ReLU::set_chunks(const vector<string>& in_chunks, const vector<string>& out_chunks) {
-    in_chunks_ = in_chunks;
-    out_chunks_ = out_chunks;
-}
+chunk_ptr ReLU::operator()(chunk_ptr& in_chunk) {
+    chunk_ptr out_chunk = make_shared<Chunk>(in_chunk->shape());
+    chunks_in_ = {in_chunk};
+    chunks_out_ = {out_chunk};
 
-void ReLU::forward(const vector<Chunk*>& input, const vector<Chunk*>& output) {
-    output[0]->reshape(input[0]->shape());
-    const float* input_data = input[0]->const_data();
-    float* output_data = output[0]->data();
-    for (int i = 0; i < input[0]->count(); ++i) {
-        output_data[i] = std::max(float(0), input_data[i]);
-    }
+    in_chunk->in_layers_.push_back(make_shared<ReLU>(*this));
+    return out_chunk;
 }
-
-void ReLU::backward(const vector<Chunk*>& input, const vector<Chunk*>& output) {
-    const float* input_data = input[0]->const_data();
-    const float* output_diff = output[0]->const_diff();
-    float* input_diff = input[0]->diff();
-    for (int i = 0; i < input[0]->count(); ++i) {
-        input_diff[i] = (input_data[i] > 0) * output_diff[i];
-    }
-}
+} // namespace micronet

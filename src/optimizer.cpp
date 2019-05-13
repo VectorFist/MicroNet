@@ -5,6 +5,10 @@
  **/
 #include "optimizer.h"
 
-Optimizer::Optimizer(float learning_rate, const vector<int>& decay_steps):
-    learning_rate_(learning_rate), decay_steps_(decay_steps) {
+namespace micronet {
+
+Optimizer::Optimizer(const string& optimizer_type, vector<float> decay_locs):
+    optimizer_type_(optimizer_type), decay_locs_(decay_locs) {
 }
+
+} // namespace micronet
