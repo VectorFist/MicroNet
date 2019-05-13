@@ -4,13 +4,16 @@
 #include <cmath>
 #include "optimizer.h"
 
+namespace micronet {
+
 class RMSProbOptimizer: public Optimizer{
 public:
-    RMSProbOptimizer(float learning_rate, const vector<int>& decay_steps, float decay_rate = 0.5);
-    virtual void optimize(shared_ptr<Chunk>& param, const string& param_name, int iter);
+    RMSProbOptimizer() = default;
+    RMSProbOptimizer(float learning_rate, vector<float> decay_locs, float decay_rate = 0.5);
+    virtual void optimize(const shared_ptr<Chunk>& param, int iter);
 private:
-    map<string, Chunk> accumulate_squared_gradient_;
-    float decay_rate_;
+    map<Chunk*, Chunk> accumulate_squared_gradient_;
 };
+} // namespace micronet
 
 #endif // RMSPROBOPTIMIZER_H

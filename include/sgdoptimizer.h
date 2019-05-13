@@ -3,13 +3,16 @@
 #include <map>
 #include "optimizer.h"
 
+namespace micronet {
+
 class SGDOptimizer: public Optimizer {
 public:
-    SGDOptimizer(float learning_rate, const vector<int>& decay_steps, float momentum = 0.9);
-    virtual void optimize(shared_ptr<Chunk>& param, const string& param_name, int iter);
+    SGDOptimizer() = default;
+    SGDOptimizer(float learning_rate, vector<float> decay_locs, float momentum = 0.9);
+    virtual void optimize(const shared_ptr<Chunk>& param, int iter);
 private:
-    map<string, Chunk> param_velocity_;
-    float momentum_;
+    map<Chunk*, Chunk> param_velocity_;
 };
+} // namespace micronet
 
 #endif // SGDOPTIMIZER_H

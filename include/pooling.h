@@ -3,19 +3,24 @@
 #include <string>
 #include "layer.h"
 
+namespace micronet {
+
 class Pooling: public Layer {
 public:
-    Pooling(int kernel_h, int kernel_w, int pad_h, int pad_w, int stride_h,
-            int stride_w, const string& layer_name, const string& pooling = "max");
-    virtual void set_chunks(const vector<string>& in_chunks, const vector<string>& out_chunks);
-    virtual void forward(const vector<Chunk*>& input, const vector<Chunk*>& output);
-    virtual void backward(const vector<Chunk*>& input, const vector<Chunk*>& output);
+    Pooling(): mask_(new Chunk) {};
+    Pooling(int kernel_h, int kernel_w, int stride_h, int stride_w, const string& padding = "valid",
+            const string& pooling = "max", const string& layer_name = "pooling");
+    virtual void forward(bool is_train=true) override;
+    virtual void backward() override;
+    chunk_ptr operator()(chunk_ptr& in_chunk);
+
+protected:
+    virtual vector<int> shape_inference() override;
+
 private:
-    int kernel_h_, kernel_w_;
-    int pad_h_, pad_w_;
-    int stride_h_, stride_w_;
-    string pooling_;
-    Chunk mask_;
+    void pad_inference();
+    chunk_ptr mask_;
 };
+} // namespace micronet
 
 #endif // POOLING_H

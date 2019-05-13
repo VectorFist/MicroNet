@@ -2,12 +2,20 @@
 #define ARGMAX_H
 #include "layer.h"
 
+namespace micronet {
+
 class ArgMax: public Layer {
 public:
-    ArgMax(const string& layer_name);
-    virtual void set_chunks(const vector<string>& in_chunks, const vector<string>& out_chunks);
-    virtual void forward(const vector<Chunk*>& input, const vector<Chunk*>& output);
-    virtual void backward(const vector<Chunk*>& input, const vector<Chunk*>& output){};
+    ArgMax(const string& layer_name = "argmax");
+    virtual void forward(bool is_train=true) override;
+    virtual void backward() override {};
+    chunk_ptr operator()(const chunk_ptr& in_chunk);
+
+protected:
+    virtual vector<int> shape_inference() override;
+
+    friend class Accuracy;
 };
+} // namespace micronet
 
 #endif // ARGMAX_H

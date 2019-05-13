@@ -6,23 +6,30 @@
 #include <iostream>
 #include <chrono>
 #include <algorithm>
+#include <memory>
 
 #include "chunk.h"
 
 using namespace std;
 
+namespace micronet {
+
+using data_t = vector<vector<float>>;
+using chunk_ptr = shared_ptr<Chunk>;
+
+
 class DataProvider {
 public:
-    DataProvider(const string& images_file, const string& labels_file, bool shuffle = true);
-    void load_batch(Chunk* images, Chunk* labels, int batch_size);
-    inline int num_images() {return num_images_;};
+    DataProvider(vector<data_t>& data_vec, bool shuffle = true);
+    void load_batch(const vector<chunk_ptr>& chunks_in, int batch_size);
+    inline int num_samples() {return num_samples_;};
 private:
     void shuffle_data();
-    vector<vector<float>> images_;
-    vector<float> labels_;
+    vector<data_t> data_vec_;
     bool shuffle_;
     int index_in_epoch_;
-    int num_images_;
+    int num_samples_;
 };
+} //namespace micronet
 
 #endif // DATAPROVIDER_H

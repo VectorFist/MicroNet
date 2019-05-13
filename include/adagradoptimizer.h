@@ -3,12 +3,17 @@
 #include <map>
 #include "optimizer.h"
 
+namespace micronet {
+
 class AdaGradOptimizer: public Optimizer{
 public:
-    AdaGradOptimizer(float learning_rate, const vector<int>& decay_steps);
-    virtual void optimize(shared_ptr<Chunk>& param, const string& param_name, int iter);
+    AdaGradOptimizer() = default;
+    AdaGradOptimizer(float learning_rate, vector<float> decay_locs);
+    virtual void optimize(const shared_ptr<Chunk>& param, int iter);
 private:
-    map<string, Chunk> accumulate_squared_gradient_;
+    map<Chunk*, Chunk> accumulate_squared_gradient_;
 };
+
+} // namespace micronet
 
 #endif // ADAGRADOPTIMIZER_H
