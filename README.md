@@ -1,6 +1,7 @@
 # MicroNet
 A simple and extensible neural network framework, which be used for image classification and image generation.
 ![lenet5](figures/lenet5.png)
+![gans](figures/gans.png)
 
 In this repository, I implemented a simple and extensible neural network framework with c++, which can be used flexibly to build image recognition neural networks and sample Generative Adversarial Networks(Gans). It is easy to extend this MicroNet to new data sets and new network structures, as long as you provider new datasets and custom network structure(just like keras). Four optimization algorithms are implemented: SGD, Adam, AdaGrad, RMSProb. 
 
