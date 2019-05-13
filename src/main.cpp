@@ -144,7 +144,7 @@ int main() {
     //net.fit(train_data, valid_data, 64, 48, 100, true);*/
 
 
-    // Train class
+    // Train classification net
     pair<vector<data_t>, vector<data_t>> mnist_data = read_mnist_data();
     map<string, data_t> train_data = {{"img", std::move(mnist_data.first[0])}, {"label", std::move(mnist_data.first[1])}};
     map<string, data_t> valid_data = {{"img", std::move(mnist_data.second[0])}, {"label", std::move(mnist_data.second[1])}};
